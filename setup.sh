@@ -65,9 +65,17 @@ install_cuda_compiler() {
     fi
 }
 
-# Exit code 0 only if llama_cpp imports without crashing and supports GPU offload.
-# Runs in a separate process because a bad build kills the process outright.
+# Written after a successful compile here. A prebuilt wheel imports fine and reports GPU
+# offload, and only crashes ("Illegal instruction") once a model loads, so an import test
+# alone cannot tell the two apart.
+COMPILED_HERE_MARKER=".venv/llama_cpp_compiled_here"
+
+# Exit code 0 only if llama_cpp was compiled by this script, imports without crashing and
+# supports GPU offload. Runs in a separate process because a bad build kills the process.
 llama_cpp_works() {
+    if [ ! -f "$COMPILED_HERE_MARKER" ]; then
+        return 1
+    fi
     python -c 'import sys, llama_cpp; sys.exit(0 if llama_cpp.llama_supports_gpu_offload() else 1)' \
         >/dev/null 2>&1
 }
@@ -84,6 +92,7 @@ build_llama_cpp() {
         echo "Build failed. Full log: llama_build.log"
         exit 1
     fi
+    touch "$COMPILED_HERE_MARKER"
 }
 
 echo "== GPU =="
@@ -103,7 +112,7 @@ pip install "nvidia-cuda-runtime-cu12==${CUDA_VERSION_DASHED/-/.}.*" "nvidia-cub
 
 echo "== llama-cpp-python (CUDA) =="
 if llama_cpp_works; then
-    echo "Existing build works, keeping it."
+    echo "Existing build was compiled here and works, keeping it."
 else
     install_cuda_compiler
     build_llama_cpp
