@@ -9,4 +9,6 @@ if [ ! -d .venv ]; then
 fi
 # shellcheck disable=SC1091
 . .venv/bin/activate
+# shellcheck disable=SC1091
+. ./cuda_env.sh
 python instance_check.py

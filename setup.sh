@@ -29,10 +29,17 @@ fi
 CMAKE_ARGS="-DGGML_CUDA=on" pip install --prefer-binary \
     --extra-index-url "$CUDA_WHEEL_INDEX" llama-cpp-python
 
+echo "== CUDA runtime libraries =="
+# The prebuilt wheel links against libcudart.so.12 and libcublas.so.12, which the
+# GPU driver does not include. Version 12.4 matches the cu124 wheel index above.
+pip install "nvidia-cuda-runtime-cu12==12.4.*" "nvidia-cublas-cu12==12.4.*"
+
 echo "== other requirements =="
 pip install -r requirements.txt
 
 echo "== check =="
+# shellcheck disable=SC1091
+. ./cuda_env.sh
 python - <<'EOF'
 import llama_cpp
 gpu = llama_cpp.llama_supports_gpu_offload()
