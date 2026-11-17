@@ -2,3 +2,4 @@
 models/
 results_*.json
 __pycache__/
+llama_build.log
