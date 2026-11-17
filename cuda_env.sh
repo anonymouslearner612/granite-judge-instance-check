@@ -1,4 +1,4 @@
-# Sourced by setup.sh and run.sh (not run directly).
+# Sourced by setup.sh, run.sh, try.sh and bench.sh (not run directly).
 #
 # The prebuilt CUDA build of llama-cpp-python needs the CUDA 12 runtime libraries
 # (libcudart, libcublas). Many AMIs ship only the GPU driver, so setup.sh installs

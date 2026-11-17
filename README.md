@@ -18,7 +18,7 @@ To pick up later changes, run `get.sh` again or `git pull` in the folder, then `
 ## Try your own messages
 
 ```bash
-./try.sh        # or: . .venv/bin/activate && python try_prompt.py
+./try.sh
 ```
 
 Type a message and press Enter. It prints the verdict, P(yes) and time for each check.
@@ -30,12 +30,15 @@ topic/intent policy and `YES_THRESHOLD` come from the `SETTINGS` block in
 ## Benchmark
 
 ```bash
-. .venv/bin/activate
-python benchmark.py                       # cases.jsonl, then 2 and 4 concurrent users
-python benchmark.py --concurrency 2,4,8   # choose the concurrent-user levels
-python benchmark.py --concurrency 0       # accuracy only, no load test
-python benchmark.py my_cases.jsonl        # your own file (.jsonl or .csv)
+./bench.sh                       # cases.jsonl, then 2 and 4 concurrent users
+./bench.sh --concurrency 2,4,8   # choose the concurrent-user levels
+./bench.sh --concurrency 0       # accuracy only, no load test
+./bench.sh my_cases.jsonl        # your own file (.jsonl or .csv)
 ```
+
+Use the `.sh` wrappers rather than calling `python` directly. They also source
+`cuda_env.sh`, which points the loader at the CUDA libraries in `.venv`. Without it you
+get `libcudart.so.12: cannot open shared object file`.
 
 ### The cases
 
