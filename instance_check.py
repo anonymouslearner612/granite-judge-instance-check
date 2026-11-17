@@ -37,7 +37,7 @@ FLASH_ATTENTION = True        # less GPU memory and faster prompt reading
 QUANTIZED_KV_CACHE = True     # store the KV cache as q8_0: about half the GPU memory (needs FLASH_ATTENTION)
 CPU_THREADS = 0               # 0 = library default
 
-CASES_FILE = "cases.jsonl"
+CASES_FILE = "cases.jsonl"    # only rows with a "check" field are used here; benchmark.py uses all
 YES_THRESHOLD = 0.5           # probability of "yes" at or above which a check is flagged
 WARMUP_CALLS = 2              # untimed calls so start-up cost is not counted
 
@@ -323,14 +323,18 @@ def timing_summary(seconds_list):
 
 
 def load_cases():
+    """The per-check cases: rows with a "check" field. expected_checks says whether that check should flag."""
     cases = []
     with open(CASES_FILE, encoding="utf-8") as cases_file:
         for line_number, line in enumerate(cases_file, start=1):
             if not line.strip():
                 continue
             case = json.loads(line)
+            if not case.get("check"):
+                continue
             if case["check"] not in CHECK_QUESTIONS:
                 raise SystemExit(f"{CASES_FILE} line {line_number}: unknown check {case['check']!r}")
+            case["expected"] = "yes" if case["expected_checks"][case["check"]] else "no"
             cases.append(case)
     return cases
 

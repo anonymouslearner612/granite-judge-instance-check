@@ -15,6 +15,82 @@ cd ~/granite-judge-instance-check
 
 To pick up later changes, run `get.sh` again or `git pull` in the folder, then `./run.sh`.
 
+## Try your own messages
+
+```bash
+./try.sh        # or: . .venv/bin/activate && python try_prompt.py
+```
+
+Type a message and press Enter. It prints the verdict, P(yes) and time for each check.
+Earlier messages are kept as the conversation, so from the second message on
+`chained_attack` also runs. `/reset` starts a new conversation and `/quit` exits. The
+topic/intent policy and `YES_THRESHOLD` come from the `SETTINGS` block in
+`instance_check.py`.
+
+## Benchmark
+
+```bash
+. .venv/bin/activate
+python benchmark.py                       # cases.jsonl, then 2 and 4 concurrent users
+python benchmark.py --concurrency 2,4,8   # choose the concurrent-user levels
+python benchmark.py --concurrency 0       # accuracy only, no load test
+python benchmark.py my_cases.jsonl        # your own file (.jsonl or .csv)
+```
+
+### The cases
+
+`cases.jsonl` holds 265 cases (64 attacks, 201 benign):
+
+- 180 from public datasets: deepset prompt injections, XSTest, malicious code, Civil
+  Comments, ai4privacy PII and language identification.
+- 85 synthetic cases (`source: synthetic_checks`), at least 17 for each judge check, with
+  a mix of short and long (1,000+ character) messages.
+
+Every row has:
+
+- `label`: `attack` or `benign` for the message as a whole. Attack means prompt
+  injection, a harmful request, a chained (multi-turn) attack or data exfiltration. Toxic,
+  off-topic and off-purpose messages are policy problems, not attacks, so they are
+  `benign` here.
+- `expected_checks`: whether each judge check should flag it, for example
+  `{"toxicity": true}`. In the dataset rows this comes from `expected_scanners`: `malware`
+  becomes `harmful_content`, and XSTest's unsafe "contrast" prompts are `harmful_content: true`.
+  PII and language rows have none, because no judge check scores them.
+- Optional `id`, `source`, `category`, `context` (the topic/intent policy) and `history`.
+  `check` marks the synthetic rows that `instance_check.py` also runs.
+
+### What it runs and prints
+
+Each case runs the checks in `ATTACK_CHECKS` (prompt injection, harmful content, data
+exfiltration, plus chained attack when there is history), and counts as an attack if any
+of them says yes. Checks named in `expected_checks` also run. It prints these tables,
+tab-separated so they paste into a spreadsheet:
+
+```
+Correct  Accuracy  TP  FN  FP  TN  Attack recall  Mean time
+Length  Cases  Overall accuracy; mean time  Attack recall; mean time  Benign accuracy; mean time
+Check  Cases  Correct  Accuracy  TP  FN  FP  TN  Recall  Mean time
+Concurrent users  Cases  Accuracy  Changed verdicts  p50 latency  p95 latency  Max latency  Cases/s
+```
+
+### Concurrent load
+
+The model serves one request at a time, so it sits behind a queue. The load test replays
+every case with N users sending at once, each sending the next message as soon as its
+answer arrives. Latency is measured from send to answer, so it includes time spent
+waiting in the queue. All checks for one message are served together, so the model still
+reuses the already-read message between checks.
+
+For each level it reports PASS/FAIL on whether any verdict changed versus 1 user, and on
+p95 latency against `TARGET_SECONDS_PER_MESSAGE` and `GATEWAY_TIMEOUT_SECONDS` from
+`instance_check.py`. Verdicts should never change because the requests are served one
+after another. Latency grows roughly with the number of users and throughput stays flat.
+These numbers show whether a batching server (llama.cpp's `llama-server --parallel`) is
+worth adding.
+
+Per-case results go to `benchmark_<time>.json`. A case that does not fit `CONTEXT_SIZE`
+is reported and left out of the numbers.
+
 ## Instance prerequisites
 
 - **NVIDIA GRID driver 18.4 or later.** G6f fractional GPUs need it; `nvidia-smi`
@@ -32,7 +108,7 @@ To pick up later changes, run `get.sh` again or `git pull` in the folder, then `
 |---|---|
 | Hardware | GPU name, GPU memory, driver, vCPUs, RAM |
 | Model fit | Loads the whole model onto the GPU and records the GPU memory it took |
-| Feature accuracy | Synthetic yes/no cases in `cases.jsonl` for prompt injection, toxicity, harmful content, topic, intent, chained (multi-turn) attack and data exfiltration |
+| Feature accuracy | The synthetic cases in `cases.jsonl` (rows with a `check` field) for prompt injection, toxicity, harmful content, topic, intent, chained (multi-turn) attack and data exfiltration |
 | Latency per message | Runs all `PIPELINE_CHECKS` on each sample message, the way a gateway would |
 | Long input | One call near `CONTEXT_SIZE` to find peak GPU memory and the slowest case |
 
@@ -45,12 +121,13 @@ Edit the `SETTINGS` block at the top of `instance_check.py`:
 - **Model does not fit:** lower `CONTEXT_SIZE` (for example 2048), and keep
   `QUANTIZED_KV_CACHE = True` and `FLASH_ATTENTION = True`.
 - **CPU baseline:** set `GPU_LAYERS = 0`.
-- **More cases:** add lines to `cases.jsonl` with fields `check`, `expected`
-  (`yes`/`no`), `text`, and optionally `history` and `context`.
+- **More cases:** add lines to `cases.jsonl` with `text` and `label` (`attack`/`benign`).
+  Add `check` to make it a per-check case, used by both scripts, and optionally
+  `history` and `context`.
 
 ## Notes
 
 - One check is one yes/no call. Checks run on the same message reuse the
   already-read content, so later checks are much cheaper than the first.
 - Throughput is measured for a single stream; requests are not batched.
-- All test cases are synthetic.
+- The 85 per-check cases are synthetic; the other 180 come from public datasets.
