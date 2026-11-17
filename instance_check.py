@@ -34,10 +34,13 @@ MODEL_DIR = "models"
 # Layers on the GPU: -1 = all 41, 0 = CPU only (for comparison). On g6f.large (L4-3Q, about
 # 2.1 GB usable after CUDA's own overhead) the whole model does not fit next to the KV cache
 # and compute buffers; measured on 2026-11-17:
-#   41 or 40 layers -> out of GPU memory
-#   38 layers       -> loads: 1856 MiB weights + 157 MiB KV cache + 108 MiB compute buffers
-# The 3 layers left on the CPU cost little: the judge reads one output token per call.
-GPU_LAYERS = 38
+#   41 or 40 layers -> out of GPU memory when the context is created
+#   38 layers       -> loads (1856 MiB weights + 157 MiB KV cache + 108 MiB compute buffers),
+#                      but crashed with a CUDA error after 12 checks: CUDA allocates more
+#                      working memory on first use of some operations, and there was no room
+#   36 layers       -> 1760 MiB weights + 149 MiB KV cache, ~100 MiB more headroom, same speed
+# The layers left on the CPU cost little: the judge reads one output token per call.
+GPU_LAYERS = 36
 BATCH_SIZE = 256              # prompt tokens read per step; 512 needs 216 MiB of compute buffers, 256 needs 108
 CONTEXT_SIZE = 4096           # max tokens per call; the KV cache for this lives in GPU memory
 FLASH_ATTENTION = True        # less GPU memory and faster prompt reading
