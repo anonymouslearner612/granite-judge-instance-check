@@ -121,8 +121,14 @@ It prints a PASS / WARN / FAIL line for each item and writes `results_<time>.jso
 
 Edit the `SETTINGS` block at the top of `instance_check.py`:
 
-- **Model does not fit:** lower `CONTEXT_SIZE` (for example 2048), and keep
-  `QUANTIZED_KV_CACHE = True` and `FLASH_ATTENTION = True`.
+- **g6f.large defaults:** the L4-3Q slice reports 2,856 MiB, but only about 2.1 GB is
+  usable after CUDA's own overhead. The whole model (41 layers) does not fit with its KV
+  cache and compute buffers, so the defaults are `GPU_LAYERS = 38`, `BATCH_SIZE = 256`,
+  `CONTEXT_SIZE = 4096`, flash attention and a q8 KV cache. The 3 layers left on the CPU
+  cost little, because the judge reads one output token per call.
+- **Model does not fit** ("Failed to create llama_context"): this is almost always GPU
+  memory. Lower `GPU_LAYERS` (e.g. 36), `BATCH_SIZE` (e.g. 128) or `CONTEXT_SIZE` (e.g.
+  2048), and keep `QUANTIZED_KV_CACHE = True` and `FLASH_ATTENTION = True`.
 - **CPU baseline:** set `GPU_LAYERS = 0`.
 - **More cases:** add lines to `cases.jsonl` with `text` and `label` (`attack`/`benign`).
   Add `check` to make it a per-check case, used by both scripts, and optionally

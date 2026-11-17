@@ -31,7 +31,14 @@ MODEL_REPO = "ibm-granite/granite-4.0-micro-GGUF"
 MODEL_FILE = "granite-4.0-micro-Q4_K_M.gguf"     # ~2.1 GB
 MODEL_DIR = "models"
 
-GPU_LAYERS = -1               # -1 = whole model on the GPU, 0 = CPU only (for comparison)
+# Layers on the GPU: -1 = all 41, 0 = CPU only (for comparison). On g6f.large (L4-3Q, about
+# 2.1 GB usable after CUDA's own overhead) the whole model does not fit next to the KV cache
+# and compute buffers; measured on 2026-11-17:
+#   41 or 40 layers -> out of GPU memory
+#   38 layers       -> loads: 1856 MiB weights + 157 MiB KV cache + 108 MiB compute buffers
+# The 3 layers left on the CPU cost little: the judge reads one output token per call.
+GPU_LAYERS = 38
+BATCH_SIZE = 256              # prompt tokens read per step; 512 needs 216 MiB of compute buffers, 256 needs 108
 CONTEXT_SIZE = 4096           # max tokens per call; the KV cache for this lives in GPU memory
 FLASH_ATTENTION = True        # less GPU memory and faster prompt reading
 QUANTIZED_KV_CACHE = True     # store the KV cache as q8_0: about half the GPU memory (needs FLASH_ATTENTION)
@@ -184,6 +191,8 @@ def load_model(model_path):
         "model_path": model_path,
         "n_gpu_layers": GPU_LAYERS,
         "n_ctx": CONTEXT_SIZE,
+        "n_batch": BATCH_SIZE,
+        "n_ubatch": BATCH_SIZE,
         "seed": 1,
         "verbose": False,
     }
@@ -460,11 +469,17 @@ def judge_instance(report):
     load = report["model_load"]
     if not load["ok"]:
         verdicts.append((FAIL, "model fits", f"model did not load: {load['error']}"))
+        if "llama_context" in load["error"]:
+            # llama.cpp only says "Failed to create llama_context"; on a small GPU the cause is
+            # almost always that the weights, KV cache and compute buffers do not fit together.
+            verdicts.append((FAIL, "model fits", "usually out of GPU memory: lower GPU_LAYERS (e.g. 36), "
+                                                 "BATCH_SIZE (e.g. 128) or CONTEXT_SIZE (e.g. 2048)"))
         return verdicts
 
     model_mb = load["model_file_mb"]
     gpu_memory_added = load.get("gpu_memory_added_mb")
-    if GPU_LAYERS != 0 and gpu_memory_added is not None and gpu_memory_added < model_mb * 0.8:
+    # Only meaningful when the whole model is meant to be on the GPU.
+    if GPU_LAYERS == -1 and gpu_memory_added is not None and gpu_memory_added < model_mb * 0.8:
         verdicts.append((WARN, "model fits", f"only {gpu_memory_added} MB went to the GPU for a {model_mb} MB "
                                              "model; part of it may be running on the CPU"))
     else:
