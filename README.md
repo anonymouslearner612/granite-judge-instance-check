@@ -104,6 +104,13 @@ after another. Latency grows roughly with the number of users and throughput sta
 These numbers show whether a batching server (llama.cpp's `llama-server --parallel`) is
 worth adding.
 
+To see how a different `YES_THRESHOLD` would score, without running the model again:
+
+```bash
+python threshold_sweep.py benchmark_<time>.json            # thresholds 0.1 to 0.5
+python threshold_sweep.py benchmark_<time>.json 0.2,0.3
+```
+
 Per-case results go to `benchmark_<time>.json`. A case that does not fit `CONTEXT_SIZE`
 is reported and left out of the numbers.
 
