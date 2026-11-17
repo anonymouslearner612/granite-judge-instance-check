@@ -289,8 +289,10 @@ class GraniteJudge:
 
         messages = build_messages(check_name, text, history or [], context)
         started = time.perf_counter()
+        # One token is enough: the score comes from the first answer token. Every extra token is
+        # another full pass through the model, which costs ~0.1 s or more on g6f.large.
         completion = self.llm.create_chat_completion(
-            messages=messages, max_tokens=2, temperature=0.0,
+            messages=messages, max_tokens=1, temperature=0.0,
             logits_processor=LogitsProcessorList([capture_first_step]))
         seconds = time.perf_counter() - started
 
