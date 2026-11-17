@@ -1,0 +1,6 @@
+# llama-cpp-python must be the CUDA build. setup.sh installs it with CUDA *before*
+# this file is used, so pip sees it as already satisfied and does not replace it with
+# the CPU-only build. Do not run `pip install -r requirements.txt` on its own first.
+llama-cpp-python>=0.3.0
+numpy
+huggingface_hub

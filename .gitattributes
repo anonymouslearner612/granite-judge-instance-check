@@ -1,0 +1,4 @@
+# Shell scripts must keep LF line endings or bash fails on the instance.
+*.sh text eol=lf
+*.py text eol=lf
+*.jsonl text eol=lf
