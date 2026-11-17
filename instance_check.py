@@ -64,7 +64,15 @@ LONG_INPUT_TOKENS = 3000      # size of the long-input test (capped to fit CONTE
 TARGET_SECONDS_PER_MESSAGE = 1.0   # all PIPELINE_CHECKS on one message, p95
 GATEWAY_TIMEOUT_SECONDS = 15       # hard per-scanner limit in the gateway
 MIN_FREE_GPU_MB = 256              # GPU memory that should stay free at peak
-MIN_ACCURACY = 0.85                # per check
+MIN_ACCURACY = 0.85                # per check, and per message-length bucket
+
+# Message-length buckets for the summary: (label, lowest, highest) in characters.
+LENGTH_BUCKETS = [
+    ("<1,000 chars", 0, 999),
+    ("1,000-4,999 chars", 1000, 4999),
+    ("5,000-9,999 chars", 5000, 9999),
+    ("10,000+ chars", 10000, None),
+]
 # ========================================================================
 
 JUDGE_SYSTEM_PROMPT = (
@@ -337,20 +345,35 @@ def timing_summary(seconds_list):
 
 
 def load_cases():
-    """The per-check cases: rows with a "check" field. expected_checks says whether that check should flag."""
+    """
+    One case per (synthetic row, check in its expected_checks). Synthetic rows are the ones
+    written for this check (source "synthetic_..."); the public-dataset rows are left to
+    benchmark.py. Checks on the same row are kept together so the model can reuse the
+    already-read message between them.
+    """
     cases = []
     with open(CASES_FILE, encoding="utf-8") as cases_file:
         for line_number, line in enumerate(cases_file, start=1):
             if not line.strip():
                 continue
-            case = json.loads(line)
-            if not case.get("check"):
+            row = json.loads(line)
+            if not str(row.get("source", "")).startswith("synthetic"):
                 continue
-            if case["check"] not in CHECK_QUESTIONS:
-                raise SystemExit(f"{CASES_FILE} line {line_number}: unknown check {case['check']!r}")
-            case["expected"] = "yes" if case["expected_checks"][case["check"]] else "no"
-            cases.append(case)
+            for check_name, should_flag in row["expected_checks"].items():
+                if check_name not in CHECK_QUESTIONS:
+                    raise SystemExit(f"{CASES_FILE} line {line_number}: unknown check {check_name!r}")
+                case = dict(row)
+                case["check"] = check_name
+                case["expected"] = "yes" if should_flag else "no"
+                cases.append(case)
     return cases
+
+
+def length_bucket_label(characters):
+    for label, lowest, highest in LENGTH_BUCKETS:
+        if characters >= lowest and (highest is None or characters <= highest):
+            return label
+    return LENGTH_BUCKETS[-1][0]
 
 
 # ---- the tests ------------------------------------------------------------------------
@@ -358,17 +381,49 @@ def run_accuracy_test(judge, cases):
     print(f"\n== accuracy: {len(cases)} synthetic cases ==")
     results = []
     for position, case in enumerate(cases, start=1):
-        answer = judge.ask(case["check"], case["text"], case.get("history"), case.get("context"))
+        preview = case["text"].replace("\n", " ")[:60]
+        try:
+            answer = judge.ask(case["check"], case["text"], case.get("history"), case.get("context"))
+        except ValueError as error:
+            # llama.cpp raises ValueError when the prompt does not fit CONTEXT_SIZE.
+            print(f"[{position:2d}/{len(cases)}] ERROR {case['check']:18} {error}  {preview}")
+            answer = {"check": case["check"], "verdict": "error", "p_yes": None, "seconds": None,
+                      "error": str(error)}
         answer["id"] = case.get("id", position)
+        answer["characters"] = len(case["text"])
         answer["expected"] = case["expected"]
         answer["correct"] = answer["verdict"] == case["expected"]
         results.append(answer)
+        if answer["verdict"] == "error":
+            continue
 
         mark = "OK" if answer["correct"] else "XX"
-        preview = case["text"].replace("\n", " ")[:60]
         print(f"[{position:2d}/{len(cases)}] {answer['seconds']:6.2f}s  {case['check']:18} "
               f"expected={case['expected']:3} got={answer['verdict']:3} p_yes={answer['p_yes']}  {mark}  {preview}")
     return results
+
+
+def summarize_by_length(results):
+    """Accuracy and time per check for each length bucket."""
+    per_length = {}
+    for label, _lowest, _highest in LENGTH_BUCKETS:
+        bucket_results = [result for result in results if length_bucket_label(result["characters"]) == label]
+        if not bucket_results:
+            continue
+        missed = [result for result in bucket_results if result["expected"] == "yes" and result["verdict"] == "no"]
+        false_alarms = [result for result in bucket_results if result["expected"] == "no" and result["verdict"] == "yes"]
+        errors = [result for result in bucket_results if result["verdict"] == "error"]
+        correct_count = sum(1 for result in bucket_results if result["correct"])
+        timed_seconds = [result["seconds"] for result in bucket_results if result["seconds"] is not None]
+        per_length[label] = {
+            "checks": len(bucket_results),
+            "accuracy": round(correct_count / len(bucket_results), 3),
+            "missed": len(missed),
+            "false_alarms": len(false_alarms),
+            "errors": len(errors),
+            "timing_seconds": timing_summary(timed_seconds),
+        }
+    return per_length
 
 
 def summarize_accuracy(results):
@@ -385,7 +440,8 @@ def summarize_accuracy(results):
             "accuracy": round(correct_count / len(check_results), 3),
             "missed_risks": [result["id"] for result in missed],
             "false_alarms": [result["id"] for result in false_alarms],
-            "timing_seconds": timing_summary([result["seconds"] for result in check_results]),
+            "timing_seconds": timing_summary(
+                [result["seconds"] for result in check_results if result["seconds"] is not None]),
         }
     return per_check
 
@@ -523,6 +579,19 @@ def judge_instance(report):
                   f"false alarms {check_summary['false_alarms'] or 'none'}")
         verdicts.append((status, f"feature: {check_name}", detail))
 
+    for length_label, length_summary in report["accuracy_by_length"].items():
+        status = PASS if length_summary["accuracy"] >= MIN_ACCURACY else WARN
+        if length_summary["errors"]:
+            status = FAIL
+        timing = length_summary["timing_seconds"]
+        detail = (f"{length_summary['accuracy']:.0%} on {length_summary['checks']} checks; "
+                  f"{length_summary['missed']} missed, {length_summary['false_alarms']} false alarms")
+        if length_summary["errors"]:
+            detail += f", {length_summary['errors']} did not fit CONTEXT_SIZE"
+        if timing:
+            detail += f"; per check mean {timing['mean']}s, p95 {timing['p95']}s"
+        verdicts.append((status, f"length: {length_label}", detail))
+
     return verdicts
 
 
@@ -607,6 +676,7 @@ def main():
     cases = load_cases()
     accuracy_results = run_accuracy_test(judge, cases)
     report["accuracy"] = summarize_accuracy(accuracy_results)
+    report["accuracy_by_length"] = summarize_by_length(accuracy_results)
     report["pipeline"] = run_pipeline_test(judge, cases)
     report["long_input"] = run_long_input_test(judge)
     report["case_results"] = accuracy_results

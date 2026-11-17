@@ -39,8 +39,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import instance_check
-from instance_check import (CHECK_QUESTIONS, GraniteJudge, ensure_model_downloaded, load_model,
-                            percentile)
+from instance_check import (CHECK_QUESTIONS, LENGTH_BUCKETS, GraniteJudge, ensure_model_downloaded,
+                            load_model, percentile)
 
 DEFAULT_CASES_FILE = "cases.jsonl"
 DEFAULT_CONCURRENCY_LEVELS = "2,4"
@@ -49,14 +49,6 @@ DEFAULT_CONCURRENCY_LEVELS = "2,4"
 # checks: cases.jsonl labels toxic, off-topic and off-purpose text benign, and scores those
 # checks in the per-check table instead. chained_attack is added when a case has history.
 ATTACK_CHECKS = ["prompt_injection", "harmful_content", "data_exfiltration"]
-
-# Length buckets for the breakdown: (label, lowest length, highest length) in characters.
-LENGTH_BUCKETS = [
-    ("0-999 characters", 0, 999),
-    ("1,000-4,999 characters", 1000, 4999),
-    ("5,000-10,000 characters", 5000, 10000),
-    ("over 10,000 characters", 10001, None),
-]
 
 ATTACK_LABELS = {"yes", "true", "1", "attack", "malicious"}
 BENIGN_LABELS = {"no", "false", "0", "benign", "safe"}

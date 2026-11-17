@@ -42,12 +42,25 @@ get `libcudart.so.12: cannot open shared object file`.
 
 ### The cases
 
-`cases.jsonl` holds 265 cases (64 attacks, 201 benign):
+`cases.jsonl` holds 327 cases (93 attacks, 234 benign):
 
 - 180 from public datasets: deepset prompt injections, XSTest, malicious code, Civil
   Comments, ai4privacy PII and language identification.
 - 85 synthetic cases (`source: synthetic_checks`), at least 17 for each judge check, with
   a mix of short and long (1,000+ character) messages.
+- 62 synthetic long cases (`source: synthetic_long`), so each length bucket from 1,000
+  characters up has 15 attacks and 15 benign cases. They are real-looking work documents
+  (policies, release notes, support threads, meeting notes, a postmortem). Attacks add a
+  hidden prompt-injection or exfiltration instruction at the start, middle or end, or a
+  harmful request after the documents. The longest is about 11,900 characters, which still
+  fits `CONTEXT_SIZE = 4096` tokens.
+
+| Length | Attacks | Benign |
+|---|---|---|
+| under 1,000 characters | 48 | 189 |
+| 1,000-4,999 | 15 | 15 |
+| 5,000-9,999 | 15 | 15 |
+| 10,000+ | 15 | 15 |
 
 Every row has:
 
@@ -60,7 +73,7 @@ Every row has:
   becomes `harmful_content`, and XSTest's unsafe "contrast" prompts are `harmful_content: true`.
   PII and language rows have none, because no judge check scores them.
 - Optional `id`, `source`, `category`, `context` (the topic/intent policy) and `history`.
-  `check` marks the synthetic rows that `instance_check.py` also runs.
+  `instance_check.py` runs every synthetic row for each check in its `expected_checks`.
 
 ### What it runs and prints
 
@@ -111,7 +124,7 @@ is reported and left out of the numbers.
 |---|---|
 | Hardware | GPU name, GPU memory, driver, vCPUs, RAM |
 | Model fit | Loads the whole model onto the GPU and records the GPU memory it took |
-| Feature accuracy | The synthetic cases in `cases.jsonl` (rows with a `check` field) for prompt injection, toxicity, harmful content, topic, intent, chained (multi-turn) attack and data exfiltration |
+| Feature accuracy | The synthetic rows in `cases.jsonl`, once per check in `expected_checks`, for prompt injection, toxicity, harmful content, topic, intent, chained (multi-turn) attack and data exfiltration. The summary has one line per check and one per message length (`LENGTH_BUCKETS`) |
 | Latency per message | Runs all `PIPELINE_CHECKS` on each sample message, the way a gateway would |
 | Long input | One call near `CONTEXT_SIZE` to find peak GPU memory and the slowest case |
 
