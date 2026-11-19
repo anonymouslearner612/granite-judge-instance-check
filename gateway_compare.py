@@ -16,12 +16,15 @@ scored from those results, so they differ only in how the results are combined.
 
 Run on the GPU instance:
    . .venv/bin/activate && . ./cuda_env.sh
-   python gateway_compare.py --gateway-src /path/to/ai-gateway-source/src
-   python gateway_compare.py --gateway-src ... my_cases.jsonl    (same format as benchmark.py)
+   python gateway_compare.py
+   python gateway_compare.py my_cases.jsonl    (same format as benchmark.py)
 
-The gateway scanners are imported from the gateway's own source, so the copy on the instance
-must be the version you want to measure. Extra packages, once (CPU torch first, otherwise
-detoxify pulls the 2+ GB CUDA build):
+The gateway scanners are the gateway's own code, from the copy in gateway_snapshot/ (which
+gateway commit it is: gateway_snapshot/SOURCE_COMMIT). To measure a newer gateway, run
+./update_gateway_snapshot.sh /path/to/ai-gateway-source where the gateway repo is, commit,
+and pull on the instance. --gateway-src points at a different copy instead.
+
+Extra packages, once (CPU torch first, otherwise detoxify pulls the 2+ GB CUDA build):
    pip install torch --index-url https://download.pytorch.org/whl/cpu
    pip install transformers detoxify presidio-analyzer presidio-anonymizer detect-secrets yara-python pydantic
    python -m spacy download en_core_web_lg
@@ -41,6 +44,7 @@ The gateway's harmful-content, known-attack and dangerous-command rule scanners 
 registered in its engine (removed 2026-11-03), so they are not run here either.
 """
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -53,6 +57,10 @@ from benchmark import load_benchmark_cases
 from instance_check import LENGTH_BUCKETS, GraniteJudge, ensure_model_downloaded, load_model, timing_summary
 
 # =============================== SETTINGS ===============================
+# The copy of the gateway's scanner code in this repo (see update_gateway_snapshot.sh;
+# gateway_snapshot/SOURCE_COMMIT says which gateway commit it is).
+DEFAULT_GATEWAY_SOURCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gateway_snapshot", "src")
+
 # Granite's questions in both cases. Toxicity and prompt injection replace the gateway's
 # two models; harmful_content covers what the gateway's removed harmful-content rules did.
 GRANITE_CHECKS = ["prompt_injection", "toxicity", "harmful_content"]
@@ -142,7 +150,13 @@ def load_gateway_scanners(gateway_source_dir):
 def run_gateway_scanner(scanner, policy, text):
     started = time.perf_counter()
     try:
-        result = scanner.scan(text, policy)
+        # Called the way the gateway engine calls it (execute_scanner_safely): with the
+        # configured action when scan() accepts one. Without it, some scanners take a
+        # different code path than in the gateway.
+        if "action" in inspect.signature(scanner.scan).parameters:
+            result = scanner.scan(text, policy, action=policy["action"])
+        else:
+            result = scanner.scan(text, policy)
     except Exception as error:
         # Counted as "found nothing", and reported, rather than stopping the whole run.
         return {"detected": False, "score": None, "seconds": round(time.perf_counter() - started, 3),
@@ -453,8 +467,9 @@ def print_scanner_errors(case_results):
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("cases_file", nargs="?", default="cases.jsonl")
-    parser.add_argument("--gateway-src", required=True,
-                        help="the gateway's src folder, the one that contains app/")
+    parser.add_argument("--gateway-src", default=DEFAULT_GATEWAY_SOURCE_DIR,
+                        help="the gateway's src folder, the one that contains app/ "
+                             "(default: the snapshot in this repo)")
     return parser.parse_args()
 
 
