@@ -47,10 +47,7 @@ def judge_message(judge, message, history):
     if history:
         checks_to_run.append("chained_attack")
 
-    results = []
-    for check_name in checks_to_run:
-        results.append(judge.ask(check_name, message, history))
-    return results
+    return judge.ask_checks(checks_to_run, message, history)
 
 
 def main():

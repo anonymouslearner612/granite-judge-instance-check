@@ -136,9 +136,9 @@ def run_case(judge, case):
         "error": None,
     }
     try:
-        for check_name in checks_for_case(case):
-            case_result["checks"].append(
-                judge.ask(check_name, case["text"], case["history"], case["context"]))
+        # All checks in one call, so a long text is read once per window, not once per check.
+        case_result["checks"] = judge.ask_checks(
+            checks_for_case(case), case["text"], case["history"], case["context"])
     except ValueError as error:
         # llama.cpp raises ValueError when the prompt does not fit CONTEXT_SIZE.
         case_result["error"] = str(error)
