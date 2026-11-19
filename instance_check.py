@@ -305,10 +305,12 @@ def combine_window_results(window_results, window_count):
     return combined
 
 
-def build_messages(check_name, text, history, context):
+def build_messages(check_name, text, history, context, note=None):
     # The content comes before the question on purpose: when several checks run on the same
     # message one after another, llama.cpp reuses the already-read prefix and only reads the
     # new question. Putting the question first would make every check re-read the content.
+    # note is optional extra information for this check (gateway_compare.py passes what a
+    # gateway scanner found); it goes after the content for the same reason.
     history_lines = []
     for turn in history:
         history_lines.append(f"{turn['role']}: {neutralize_tags(turn['content'])}")
@@ -317,6 +319,8 @@ def build_messages(check_name, text, history, context):
     if history_lines:
         parts.append("<conversation>\n" + "\n".join(history_lines) + "\n</conversation>")
     parts.append(f"<content>\n{neutralize_tags(text)}\n</content>")
+    if note:
+        parts.append(f"Note: {note}")
 
     question = CHECK_QUESTIONS[check_name].format(context=context or DEFAULT_CONTEXT.get(check_name, ""))
     parts.append(f"Question: {question}\nAnswer yes or no.")
@@ -361,9 +365,11 @@ class GraniteJudge:
         """Run one check on the text. See ask_checks for how long text is handled."""
         return self.ask_checks([check_name], text, history, context)[0]
 
-    def ask_checks(self, check_names, text, history=None, context=None):
+    def ask_checks(self, check_names, text, history=None, context=None, notes=None):
         """
         Run several checks on the same text; returns one result per check, in order.
+        notes, if given, is {check name: note} - extra information shown with that check's
+        question (see build_messages).
 
         Text longer than WINDOW_CHARS is checked window by window (history is sent whole with
         every window), and a check flags if any window flags. The loop is window first, then
@@ -375,13 +381,15 @@ class GraniteJudge:
         block there. So for a flagged long text, p_yes is that window's score, not the
         highest of all windows.
         """
+        notes = notes or {}
         windows = split_into_windows(str(text))
         window_results_by_check = {check_name: [] for check_name in check_names}
         checks_still_reading = list(check_names)
 
         for window_text in windows:
             for check_name in list(checks_still_reading):
-                window_result = self.ask_window(check_name, window_text, history, context)
+                window_result = self.ask_window(check_name, window_text, history, context,
+                                                notes.get(check_name))
                 window_results_by_check[check_name].append(window_result)
                 if window_result["verdict"] == "yes":
                     checks_still_reading.remove(check_name)
@@ -397,7 +405,7 @@ class GraniteJudge:
                 results.append(combine_window_results(window_results, len(windows)))
         return results
 
-    def ask_window(self, check_name, text, history=None, context=None):
+    def ask_window(self, check_name, text, history=None, context=None, note=None):
         """One model call: the whole text in a single prompt."""
         from llama_cpp import LogitsProcessorList
 
@@ -408,7 +416,7 @@ class GraniteJudge:
                 first_step["p_yes"], first_step["answer_mass"] = self.yes_probability(scores)
             return scores
 
-        messages = build_messages(check_name, text, history or [], context)
+        messages = build_messages(check_name, text, history or [], context, note)
         started = time.perf_counter()
         # One token is enough: the score comes from the first answer token. Every extra token is
         # another full pass through the model, which costs ~0.1 s or more on g6f.large.
