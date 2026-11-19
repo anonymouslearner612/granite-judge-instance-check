@@ -5,7 +5,7 @@ Type your own messages and see what the Granite judge says about each one.
 Run:   python try_prompt.py
 
 Each message you type is sent through every check (prompt injection, toxicity, harmful
-content, topic, intent, data exfiltration) and the verdict, P(yes) and time are printed.
+content, intent, data exfiltration; topic is switched off) and the verdict, P(yes) and time are printed.
 Your earlier messages are kept as the conversation, so from the second message on the
 chained_attack check also runs over the whole conversation.
 Model settings, the topic/intent policy and YES_THRESHOLD come from the SETTINGS block
@@ -19,7 +19,12 @@ import instance_check
 from instance_check import CHECK_QUESTIONS, GraniteJudge, ensure_model_downloaded, load_model
 
 # chained_attack needs earlier turns, so it only runs once there is a conversation.
-MESSAGE_CHECKS = [check_name for check_name in CHECK_QUESTIONS if check_name != "chained_attack"]
+# topic is switched off for now; delete it from this list to run it again.
+SKIPPED_CHECKS = [
+    "chained_attack",
+    "topic",
+]
+MESSAGE_CHECKS = [check_name for check_name in CHECK_QUESTIONS if check_name not in SKIPPED_CHECKS]
 
 
 def print_results(results):
@@ -53,7 +58,7 @@ def main():
     llm = load_model(ensure_model_downloaded())
     judge = GraniteJudge(llm)
 
-    print(f"allowed topics : {instance_check.DEFAULT_ALLOWED_TOPICS}")
+    # print(f"allowed topics : {instance_check.DEFAULT_ALLOWED_TOPICS}")
     print(f"agent purpose  : {instance_check.DEFAULT_AGENT_PURPOSE}")
     print(f"yes threshold  : {instance_check.YES_THRESHOLD}")
     print("Type a message and press Enter. /reset starts a new conversation, /quit exits.\n")
