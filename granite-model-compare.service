@@ -1,0 +1,23 @@
+# Template for install_compare_service.sh, which fills in __USER__, __PROJECT_DIR__ and
+# __ARGUMENTS__ and installs it to /etc/systemd/system. Do not copy it there by hand.
+#
+# Type=oneshot: the comparison runs once and the service stops when it is done. No Restart=,
+# so a finished or failed run is not started again.
+[Unit]
+Description=Compare candidate guardrail judge models (granite-judge-instance-check)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/compare.sh __ARGUMENTS__
+Environment=PYTHONUNBUFFERED=1
+# oneshot services are killed after 90 s by default; a full comparison takes hours.
+TimeoutStartSec=infinity
+# Stopping the service also stops the child process running the current model.
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

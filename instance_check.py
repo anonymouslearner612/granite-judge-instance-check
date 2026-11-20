@@ -305,7 +305,7 @@ def combine_window_results(window_results, window_count):
     return combined
 
 
-def build_messages(check_name, text, history, context, note=None):
+def build_messages(check_name, text, history, context, note=None, system_prompt=JUDGE_SYSTEM_PROMPT):
     # The content comes before the question on purpose: when several checks run on the same
     # message one after another, llama.cpp reuses the already-read prefix and only reads the
     # new question. Putting the question first would make every check re-read the content.
@@ -326,16 +326,17 @@ def build_messages(check_name, text, history, context, note=None):
     parts.append(f"Question: {question}\nAnswer yes or no.")
 
     return [
-        {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": "\n\n".join(parts)},
     ]
 
 
 class GraniteJudge:
-    def __init__(self, llm):
+    def __init__(self, llm, system_prompt=JUDGE_SYSTEM_PROMPT):
         import numpy
         self.numpy = numpy
         self.llm = llm
+        self.system_prompt = system_prompt
         self.yes_token_ids = self.first_token_ids("yes")
         self.no_token_ids = self.first_token_ids("no")
 
@@ -405,6 +406,20 @@ class GraniteJudge:
                 results.append(combine_window_results(window_results, len(windows)))
         return results
 
+    def generate_first_token(self, check_name, text, history, context, note, logits_processors):
+        """
+        Send one check to the model and generate only the first answer token.
+        Returns (answer text, token usage). Subclasses with another prompt format override
+        this (model_compare.py's GuardianJudge); scoring and windowing stay the same.
+        """
+        messages = build_messages(check_name, text, history, context, note, self.system_prompt)
+        # One token is enough: the score comes from the first answer token. Every extra token is
+        # another full pass through the model, which costs ~0.1 s or more on g6f.large.
+        completion = self.llm.create_chat_completion(
+            messages=messages, max_tokens=1, temperature=0.0, logits_processor=logits_processors)
+        answer_text = (completion["choices"][0]["message"]["content"] or "").strip()
+        return answer_text, completion.get("usage") or {}
+
     def ask_window(self, check_name, text, history=None, context=None, note=None):
         """One model call: the whole text in a single prompt."""
         from llama_cpp import LogitsProcessorList
@@ -416,23 +431,17 @@ class GraniteJudge:
                 first_step["p_yes"], first_step["answer_mass"] = self.yes_probability(scores)
             return scores
 
-        messages = build_messages(check_name, text, history or [], context, note)
         started = time.perf_counter()
-        # One token is enough: the score comes from the first answer token. Every extra token is
-        # another full pass through the model, which costs ~0.1 s or more on g6f.large.
-        completion = self.llm.create_chat_completion(
-            messages=messages, max_tokens=1, temperature=0.0,
-            logits_processor=LogitsProcessorList([capture_first_step]))
+        answer_text, usage = self.generate_first_token(
+            check_name, text, history or [], context, note, LogitsProcessorList([capture_first_step]))
         seconds = time.perf_counter() - started
 
-        answer_text = (completion["choices"][0]["message"]["content"] or "").strip()
         p_yes = first_step.get("p_yes")
         if p_yes is not None:
             verdict = "yes" if p_yes >= YES_THRESHOLD else "no"
         else:
             verdict = "yes" if answer_text.lower().startswith("yes") else "no"
 
-        usage = completion.get("usage") or {}
         return {
             "check": check_name,
             "verdict": verdict,

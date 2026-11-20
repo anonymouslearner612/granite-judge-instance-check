@@ -1,5 +1,6 @@
 .venv/
 models/
 results_*.json
+comparison_*/
 __pycache__/
 llama_build.log

@@ -114,6 +114,51 @@ python threshold_sweep.py benchmark_<time>.json 0.2,0.3
 Per-case results go to `benchmark_<time>.json`. A case that does not fit `CONTEXT_SIZE`
 is reported and left out of the numbers.
 
+## Compare models
+
+`model_compare.py` runs the same cases and checks as the benchmark (accuracy and time, no
+load test) on each candidate model in its `MODELS` list. All are open-source (Apache 2.0 or
+MIT) and from non-Chinese developers:
+
+| Model | Developer | Size (Q4_K_M) | Prompt style |
+|---|---|---|---|
+| granite-4.0-micro (current judge) | IBM | 2.10 GB | judge questions |
+| granite-guardian-3.1-2b | IBM | 1.55 GB | Granite Guardian |
+| granite-guardian-3.2-3b-a800m | IBM | 2.02 GB | Granite Guardian |
+| phi-4-mini | Microsoft | 2.49 GB | judge questions |
+| smollm3-3b | Hugging Face | 1.92 GB | judge questions |
+| ministral-3-3b | Mistral AI | 2.15 GB | judge questions |
+
+Granite Guardian models get each check as a custom risk definition
+(`GUARDIAN_RISK_DEFINITIONS`, the same wording as `CHECK_QUESTIONS`) in their own prompt
+format. The other models get the questions from `instance_check.py`.
+
+A full run takes hours, so run it as a systemd service. It keeps going after SSH
+disconnects, runs once and stops (it is not started again at boot):
+
+```bash
+./install_compare_service.sh                     # all models
+./install_compare_service.sh --models granite-guardian-3.1-2b,granite-4.0-micro
+./install_compare_service.sh --delete-models     # remove each model file after its run
+journalctl -u granite-model-compare -f           # follow the output
+sudo systemctl stop granite-model-compare        # stop early
+```
+
+Or in the foreground: `./compare.sh` with the same arguments.
+
+Results go to `comparison_<time>/`: `comparison.txt` (tables per model and per check, tab-separated),
+`comparison.json`, and each model's per-case `<model>.json` and `<model>.log`. The summary is
+rewritten after every model, so a stopped run keeps what finished.
+
+Each model runs in its own process, so one that runs out of GPU memory cannot stop the
+others. A failed model is retried with 4 fewer GPU layers, up to 3 tries. Apart from
+granite-4.0-micro's 36, the `gpu_layers` values are first guesses; the `GPU layers` column shows
+what each model ran with. Downloading every model needs about 12 GB of disk; use
+`--delete-models` if space is short.
+
+`Answer mass` is how much of the first token's probability went to yes/no. Below 0.5 the
+model mostly answered something else, so its scores are not reliable (a warning is printed).
+
 ## Instance prerequisites
 
 - **NVIDIA GRID driver 18.4 or later.** G6f fractional GPUs need it; `nvidia-smi`
